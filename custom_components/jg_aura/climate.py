@@ -74,6 +74,16 @@ class JgAuraClimate(JgAuraZoneEntity, ClimateEntity):
     def __init__(self, coordinator: JgAuraCoordinator, device_id: str) -> None:
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{coordinator.data.device_id}_{device_id}"
+        # Shown immediately after a write so the UI doesn't sit on the old value
+        # for the ~6 s the gateway takes to report it back. Cleared on the next
+        # coordinator update, whatever it says — so a write that silently failed
+        # reverts visibly rather than being masked.
+        self._optimistic_target: float | None = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._optimistic_target = None
+        super()._handle_coordinator_update()
 
     @property
     def device_id(self) -> str:
@@ -86,6 +96,8 @@ class JgAuraClimate(JgAuraZoneEntity, ClimateEntity):
 
     @property
     def target_temperature(self) -> float | None:
+        if self._optimistic_target is not None:
+            return self._optimistic_target
         zone = self.zone
         return zone.target_temperature if zone else None
 
@@ -94,7 +106,8 @@ class JgAuraClimate(JgAuraZoneEntity, ClimateEntity):
         zone = self.zone
         if zone is None or zone.heat_demand is None:
             return None
-        # PROVISIONAL: the upper bank of the mode index is read as heat demand.
+        # The mode index's upper bank is the heat-demand flag — verified on live
+        # hardware, see const.MODE_BANK_SIZE.
         return HVACAction.HEATING if zone.heat_demand else HVACAction.IDLE
 
     @property
@@ -122,4 +135,6 @@ class JgAuraClimate(JgAuraZoneEntity, ClimateEntity):
             raise HomeAssistantError(
                 f"could not set {self.name or self._device_id} to {temperature}: {err}"
             ) from err
-        await self.coordinator.async_refresh_after_write()
+        self._optimistic_target = float(temperature)
+        self.async_write_ha_state()
+        self.coordinator.schedule_refresh_after_write()

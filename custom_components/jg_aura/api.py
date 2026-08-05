@@ -113,7 +113,7 @@ class ThermostatState:
     mode_key: str
     detail: str
     preset: str | None
-    heat_demand: bool | None  # PROVISIONAL -- see const.MODE_BANK_SIZE
+    heat_demand: bool | None  # from the mode index's upper bank -- see const.MODE_BANK_SIZE
 
     @property
     def unique_suffix(self) -> str:

@@ -74,9 +74,14 @@ SUMMARY_TERMINATOR: Final = "ffff"
 # than shown, so a flat battery does not look like a freezing room.
 OFFLINE_TEMP_SENTINEL: Final = 6.5
 
-# The mode index appears to be two banks of 15. `index % 15` selects the mode;
-# `index // 15` is PROVISIONALLY the heat-demand flag (verified in phase 4 by
-# watching a zone that is actively calling for heat).
+# The mode index is two banks of 15: `index % 15` selects the mode, and
+# `index // 15` is the heat-demand flag.
+#
+# VERIFIED on live hardware 2026-08-05. Driving one zone (80ec) to 28.0 C
+# against a 24.5 C room moved its reported index from 2 to 18 at the moment it
+# began calling for heat; restoring 18.0 C returned it to 2. 18 // 15 == 1,
+# 18 % 15 == 3 — so the bank bit flipped while the sub-mode stayed within the
+# scheduled range. See test_heat_demand_verified_against_live_hardware.
 MODE_BANK_SIZE: Final = 15
 
 # Sub-mode (index % 15) -> canonical mode key.

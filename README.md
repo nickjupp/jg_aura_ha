@@ -43,13 +43,17 @@ substantive fixes are:
 
 Zone state attributes expose `jg_mode_index`, `jg_mode`, `jg_preset` and
 `jg_status_flag` — deliberately, so the mode encoding can be confirmed from
-recorder history.
+recorder history. `jg_status_flag` is still unexplained: 4 on every live zone,
+13 on a dead one.
 
-## Status: setpoints yes, modes not yet
+## Status: setpoints verified, modes not yet
 
-**Temperature writes are implemented.** The encoding is confirmed against the value
-the gateway retained from the JG Aura app's own last write (`B06 = '!1898B'` →
-`(66−32) × 0.5 = 17.0 °C`), and the unit tests assert it byte-for-byte.
+**Temperature writes are implemented and confirmed end to end.** On 2026-08-05
+three setpoints were written to a live zone through Home Assistant — 20.0, 28.0
+and 18.0 °C — and all three round-tripped back from the gateway correctly, with
+the zone's scheduled mode left intact. The encoding also matches the value the
+gateway retained from the JG Aura app's own last write (`B06 = '!1898B'` →
+`(66−32) × 0.5 = 17.0 °C`). The unit tests assert all of it byte-for-byte.
 
 **Mode/preset writes are deliberately disabled.** `ClimateEntityFeature.PRESET_MODE`
 is not declared. The payload *format* is corroborated the same way
@@ -64,8 +68,10 @@ characters, setpoint writes are not padded. That is a plausible cause of silent
 write failures.
 
 `hvac_action` reads the upper bank of the mode index (`index // 15`) as heat demand.
-The arithmetic is tested; the *meaning* is inferred and wants confirming against a
-zone that is actively calling for heat.
+**This is now verified on hardware.** Driving a zone to 28.0 °C against a 24.5 °C
+room moved its reported index from 2 to 18 at the moment it began calling for heat,
+and restoring 18.0 °C returned it to 2 — so `18 // 15 == 1` is the demand flag while
+`18 % 15 == 3` remains a scheduled mode. `hvac_action` can be trusted.
 
 ## Installation
 

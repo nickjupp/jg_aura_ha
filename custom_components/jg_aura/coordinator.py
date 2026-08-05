@@ -51,6 +51,7 @@ class JgAuraCoordinator(DataUpdateCoordinator[GatewaySnapshot]):
             email=entry.data["email"],
             password_hash=entry.data["password_hash"],
         )
+        self._pending_refresh: asyncio.Task[None] | None = None
 
     async def _async_update_data(self) -> GatewaySnapshot:
         try:
@@ -61,11 +62,27 @@ class JgAuraCoordinator(DataUpdateCoordinator[GatewaySnapshot]):
         except JgAuraError as err:
             raise UpdateFailed(str(err)) from err
 
-    async def async_refresh_after_write(self) -> None:
-        """Re-poll once the gateway has had time to apply a command.
+    def schedule_refresh_after_write(self) -> None:
+        """Queue a delayed re-poll, without blocking the caller.
 
         The cloud polls the gateway rather than being pushed to, so reading back
-        immediately returns the pre-write value.
+        immediately returns the pre-write value. Waiting inline for that settle
+        made every service call outlast Home Assistant's state-verification
+        window and emit "state change could not be verified within timeout",
+        so the wait now runs as a background task instead.
+
+        Coalescing: one pending refresh is enough. Several zones changed in
+        quick succession share it, since the poll fetches all of them anyway.
         """
+        if self._pending_refresh is not None and not self._pending_refresh.done():
+            return
+        assert self.config_entry is not None
+        self._pending_refresh = self.config_entry.async_create_background_task(
+            self.hass,
+            self._delayed_refresh(),
+            name=f"{DOMAIN}_post_write_refresh",
+        )
+
+    async def _delayed_refresh(self) -> None:
         await asyncio.sleep(POST_WRITE_REFRESH_DELAY)
         await self.async_request_refresh()

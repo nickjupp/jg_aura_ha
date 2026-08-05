@@ -189,13 +189,43 @@ def test_empty_summary_is_empty_not_an_error():
 
 
 def test_heat_demand_reads_the_upper_bank():
-    # PROVISIONAL semantics, but the arithmetic must be right: index 17 is
-    # bank 1 / sub 2, i.e. the same mode as index 2 with the flag set.
+    # Index 17 is bank 1 / sub 2, i.e. the same mode as index 2 with the flag set.
     low = parse_summary("aaaa" + chr(36) + chr(34) + "RD")["aaaa"]
     high = parse_summary("aaaa" + chr(36) + chr(49) + "RD")["aaaa"]
     assert (low.mode_index, low.heat_demand) == (2, False)
     assert (high.mode_index, high.heat_demand) == (17, True)
     assert low.mode_key == high.mode_key == "schedule"
+
+
+def test_heat_demand_verified_against_live_hardware():
+    """The bank bit, confirmed on a real gateway rather than inferred.
+
+    2026-08-05: driving zone 80ec to 28.0 C against a 24.5 C room made the
+    gateway report mode index 18 while the zone called for heat; restoring
+    18.0 C returned it to index 2 and idle. 18 // 15 == 1 (demand),
+    18 % 15 == 3 (still a scheduled mode).
+
+    Record below is the observed state: flag 4, mode 18, current 24.5, target 28.0.
+    """
+    state = parse_summary("80ec" + chr(36) + chr(50) + chr(81) + chr(88))["80ec"]
+    assert state.mode_index == 18
+    assert state.heat_demand is True
+    assert state.mode_key == "schedule"
+    assert state.detail == "schedule_low"
+    assert state.current_temperature == 24.5
+    assert state.target_temperature == 28.0
+    assert state.available is True
+
+
+def test_setpoints_used_in_the_live_write_test():
+    """The three values actually written to zone 80ec on 2026-08-05.
+
+    All three round-tripped through the gateway and read back correctly, so
+    these encodings are confirmed end to end, not just against a retained value.
+    """
+    assert encode_setpoint("80ec", 20.0) == "!80ecH"
+    assert encode_setpoint("80ec", 28.0) == "!80ecX"
+    assert encode_setpoint("80ec", 18.0) == "!80ecD"
 
 
 # --- snapshot --------------------------------------------------------------
