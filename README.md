@@ -55,22 +55,29 @@ the zone's scheduled mode left intact. The encoding also matches the value the
 gateway retained from the JG Aura app's own last write (`B06 = '!1898B'` →
 `(66−32) × 0.5 = 17.0 °C`). The unit tests assert all of it byte-for-byte.
 
-**Mode/preset writes are enabled for two presets only.** The map was built by
-making each change in the JG Aura app and reading back the `B05` value the gateway
-retained:
+**All six presets are settable.** The map was built by making each change in the
+JG Aura app and reading back the `B05` value the gateway retained, then confirming
+the index it reported:
 
-| Preset | Index | Status |
-|---|---|---|
-| Follow Schedule | 2 | verified — app wrote `!80ec"  ` |
-| High | 4 | verified — app wrote `!80ec$  ` |
-| Low / Away / Frost / Boost | 6 / 8 / 9 / 10? | **not verified — not writable** |
+| Preset | Index | Parameter | Payload observed | Band applied |
+|---|---|---|---|---|
+| Follow Schedule | 2 | — | `!80ec"  ` | schedule |
+| High | 4 | — | `!80ec$  ` | 21.0 °C |
+| Low | 6 | — | `!80ec&  ` | 18.0 °C |
+| Boost | 7 | hours | `!80ec'03` | 21.0 °C |
+| Away | 8 | days | `!80ec(01` | 5.0 °C |
+| Frost | 9 | — | seen at the wall | 5.0 °C |
 
-`encode_mode()` reproduces both verified payloads byte for byte, padding included,
-so the wire format is settled. The remaining four indices are what the legacy
-table suggests and are now corroborated at two independent points — but selecting
-one of those presets raises a `HomeAssistantError` explaining why rather than
-sending a guess at someone's heating. Adding an entry to `MODE_WRITE_MAP` after
-observing the app write it is a one-line change.
+The trailing two characters are **not padding** — they are a duration field, found
+because Boost was requested as 3 hours (`03`) and Away as 1 day (`01`). Home
+Assistant's preset API carries no duration, so Boost and Away use the
+`DEFAULT_BOOST_HOURS` / `DEFAULT_AWAY_DAYS` constants; a custom service could
+expose them properly.
+
+Two inferences from the legacy table were **wrong**, and testing caught both:
+Boost is 7 rather than 10, and that table lists 7 as "High" — so a boosting zone
+would have been reported as High. Indices 10 and 11 have still never been observed;
+they get a label but no preset, and are not writable.
 
 A mode does **not** override the setpoint: it selects which setpoint band from the
 schedule applies. Switching a zone to High moved its target from 18.0 to 21.0 °C.

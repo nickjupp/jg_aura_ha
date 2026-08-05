@@ -156,17 +156,17 @@ class JgAuraClimate(JgAuraZoneEntity, ClimateEntity):
         self.coordinator.schedule_refresh_after_write()
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        index = MODE_WRITE_MAP.get(preset_mode)
-        if index is None:
+        entry = MODE_WRITE_MAP.get(preset_mode)
+        if entry is None:
             raise HomeAssistantError(
-                f"{preset_mode!r} cannot be set from Home Assistant yet: the mode "
-                "index the JG Aura app writes for it has not been observed, and "
-                "guessing would put the zone on the wrong setpoint band. "
-                f"Settable presets: {', '.join(sorted(MODE_WRITE_MAP))}. "
-                "Use the JG Aura app for the others."
+                f"{preset_mode!r} is not settable from Home Assistant. "
+                f"Settable presets: {', '.join(sorted(MODE_WRITE_MAP))}."
             )
+        index, parameter = entry
         try:
-            await self.coordinator.client.async_set_mode_index(self._device_id, index)
+            await self.coordinator.client.async_set_mode_index(
+                self._device_id, index, parameter
+            )
         except (JgAuraError, ValueError) as err:
             raise HomeAssistantError(
                 f"could not set {self.name or self._device_id} to {preset_mode}: {err}"

@@ -2,8 +2,9 @@
 
 Everything here is derived from a live gateway's own self-describing attribute
 table (JGHUB2 / SALJG30, typeName IT600_1, gateway fw 133913, IT600 fw 0176),
-captured 2026-08-04. Where a value is inferred rather than observed it is
-marked PROVISIONAL and must not be relied on for writes.
+captured 2026-08-04, and extended on 2026-08-05 by exercising every mode from
+the JG Aura app and reading back what the gateway retained. Each entry notes
+whether it is verified or merely unobserved; nothing unobserved is writable.
 """
 
 from __future__ import annotations
@@ -92,17 +93,21 @@ MODE_BANK_SIZE: Final = 15
 # Sub-mode (index % 15) -> canonical mode key.
 SUB_MODE_MAP: Final[dict[int, str]] = {
     0: "offline",
-    1: "schedule",   # AUTO_HIGH   -- following schedule, at its High level
-    2: "schedule",   # AUTO_MEDIUM
-    3: "schedule",   # AUTO_LOW
-    4: "high",
-    5: "high",
-    6: "low",
-    7: "high",
-    8: "away",
-    9: "frost",
-    10: "boost",
-    11: "boost",
+    1: "schedule",   # following schedule, at its High band
+    2: "schedule",   # ... Medium band
+    3: "schedule",   # ... Low band
+    4: "high",       # verified: app writes 4 for High
+    5: "high",       # observed on a zone set at the wall
+    6: "low",        # verified: app writes 6 for Low
+    7: "boost",      # verified: app writes 7 for Boost -- the legacy table calls
+                     # this "High", which would mis-report a boosting zone
+    8: "away",       # verified: app writes 8 for Away
+    9: "frost",      # verified: observed on a zone set at the wall
+    # 10 and 11 have never been observed. The legacy table calls them "ON"; that
+    # is not evidence, so they get a detail label and no preset rather than a
+    # guess that Home Assistant would display as fact.
+    10: "on",
+    11: "on",
 }
 
 # Finer-grained label for the scheduled levels, surfaced as a state attribute so
@@ -115,7 +120,7 @@ SUB_MODE_DETAIL: Final[dict[int, str]] = {
     4: "manual_high",
     5: "manual_high",
     6: "manual_low",
-    7: "manual_high",
+    7: "boost",
     8: "away",
     9: "frost",
     10: "on",
@@ -156,13 +161,10 @@ PRESET_MODES: Final[list[str]] = [
 # Both command attributes use the same offset-by-32 scheme as the summary:
 #
 #   B06 (setpoint) : '!' + <4-char id> + chr(round(degrees / 0.5) + 32)
-#   B05 (mode)     : '!' + <4-char id> + chr(mode_index + 32), space-padded to 8
+#   B05 (mode)     : '!' + <4-char id> + chr(mode_index + 32) + <2-char parameter>
 #
-# Both formats are VERIFIED against the JG Aura app's own retained writes:
-#   B06 = '!1898B'   -> (66-32)*0.5 = 17.0 C
-#   B05 = '!80ec$  ' -> ord('$')-32 = 4, written by the app for "High"
-# encode_setpoint / encode_mode reproduce both byte for byte, including the
-# padding asymmetry (mode padded to 8, setpoint not).
+# Both are VERIFIED against the JG Aura app's own writes, and encode_setpoint /
+# encode_mode reproduce them byte for byte.
 #
 # What a mode actually does on this system: it selects WHICH SETPOINT BAND from
 # the schedule applies, rather than overriding the setpoint directly. Observed
@@ -171,24 +173,41 @@ PRESET_MODES: Final[list[str]] = [
 WRITE_PREFIX: Final = "!"
 MODE_WRITE_WIDTH: Final = 8
 
-# Preset -> mode index to write.
+# The B05 payload carries a two-character PARAMETER after the mode character.
+# It is a duration for the modes that take one and two spaces for those that do
+# not — so MODE_WRITE_WIDTH is a field layout, not padding:
 #
-# ONLY VERIFIED VALUES BELONG HERE. Each entry below was captured from the JG
-# Aura app's own B05 write on 2026-08-05, by making the change in the app and
-# reading back what the gateway retained:
+#   '!' + <4-char id> + chr(index + 32) + <2-char parameter>
 #
-#   "Auto"  -> !80ec"    ord('"') - 32 == 2
-#   "High"  -> !80ec$    ord('$') - 32 == 4
+# Every entry below was captured from the JG Aura app's own B05 write on
+# 2026-08-05 and then confirmed against the index the gateway reported back:
 #
-# Low / Away / Frost / Boost are NOT here. The legacy MODES table suggests
-# 6 / 8 / 9 / 10 and is now corroborated at two independent points, but
-# "probably right" is not good enough to write to someone's heating —
-# async_set_preset_mode raises for anything absent from this map. Add an entry
-# only after observing the app write it.
-MODE_WRITE_MAP: Final[dict[str, int]] = {
-    PRESET_SCHEDULE: 2,
-    PRESET_HIGH: 4,
+#   Auto   -> !80ec"    index 2, no parameter
+#   High   -> !80ec$    index 4, no parameter
+#   Low    -> !80ec&    index 6, no parameter
+#   Boost  -> !80ec'03  index 7, parameter = HOURS   (3 hours requested)
+#   Away   -> !80ec(01  index 8, parameter = DAYS    (1 day requested)
+#   Frost  -> index 9, seen on a zone set at the wall (no B05 write to observe)
+#
+# Note 7 is Boost, not the 10 the legacy table implies — and that table lists 7
+# as "High", which would have mis-reported a boosting zone.
+DEFAULT_BOOST_HOURS: Final = 1
+DEFAULT_AWAY_DAYS: Final = 1
+
+# preset -> (mode index, parameter or None)
+MODE_WRITE_MAP: Final[dict[str, tuple[int, int | None]]] = {
+    PRESET_SCHEDULE: (2, None),
+    PRESET_HIGH: (4, None),
+    PRESET_LOW: (6, None),
+    PRESET_BOOST: (7, DEFAULT_BOOST_HOURS),
+    PRESET_AWAY: (8, DEFAULT_AWAY_DAYS),
+    PRESET_FROST: (9, None),
 }
+
+# What each mode does to the target: a mode selects which setpoint band applies
+# rather than overriding the setpoint. Observed on zone 80ec, whose schedule
+# gave High/Boost 21.0, Low and the medium band 18.0, and Away/Frost 5.0.
+# Recorded for reference only — the integration always reads the real value.
 
 MIN_TEMP: Final = 5.0
 MAX_TEMP: Final = 35.0

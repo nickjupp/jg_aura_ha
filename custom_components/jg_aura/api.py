@@ -291,17 +291,27 @@ def encode_setpoint(device_id: str, temperature: float) -> str:
     return f"{WRITE_PREFIX}{device_id}{chr(steps + CHAR_OFFSET)}"
 
 
-def encode_mode(device_id: str, mode_index: int) -> str:
+def encode_mode(
+    device_id: str, mode_index: int, parameter: int | None = None
+) -> str:
     """Build a B05 payload.
 
-    PROVISIONAL. The encoding matches the summary's own offset-by-32 scheme and
-    the gateway's retained last write, but which index means "resume schedule"
-    has not been established, so nothing calls this yet.
+    Layout is `'!' + <4-char id> + chr(index + 32) + <2-char parameter>`. The
+    trailing field is a duration for the modes that take one — hours for Boost,
+    days for Away — and two spaces for those that don't. Verified against the JG
+    Aura app's own writes; see const.MODE_WRITE_MAP.
     """
     if not 0 <= mode_index <= 25:
         raise ValueError(f"mode index {mode_index} out of range")
-    payload = f"{WRITE_PREFIX}{device_id}{chr(mode_index + CHAR_OFFSET)}"
-    return payload.ljust(MODE_WRITE_WIDTH)
+    if parameter is None:
+        tail = "  "
+    elif 0 <= parameter <= 99:
+        tail = f"{parameter:02d}"
+    else:
+        raise ValueError(f"parameter {parameter} must be 0-99 or None")
+    payload = f"{WRITE_PREFIX}{device_id}{chr(mode_index + CHAR_OFFSET)}{tail}"
+    assert len(payload) == MODE_WRITE_WIDTH
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +483,10 @@ class JgAuraClient:
         """Set a zone's target temperature."""
         await self._write_attribute(ATTR_SET_SETPOINT, encode_setpoint(device_id, temperature))
 
-    async def async_set_mode_index(self, device_id: str, mode_index: int) -> None:
-        """Set a zone's operating mode. PROVISIONAL -- unverified, see encode_mode."""
-        await self._write_attribute(ATTR_SET_MODE, encode_mode(device_id, mode_index))
+    async def async_set_mode_index(
+        self, device_id: str, mode_index: int, parameter: int | None = None
+    ) -> None:
+        """Set a zone's operating mode, with an optional duration parameter."""
+        await self._write_attribute(
+            ATTR_SET_MODE, encode_mode(device_id, mode_index, parameter)
+        )

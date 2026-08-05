@@ -217,6 +217,76 @@ def test_heat_demand_verified_against_live_hardware():
     assert state.available is True
 
 
+def test_mode_write_map_matches_the_app_payloads():
+    """Every B05 payload the JG Aura app sent on 2026-08-05, reproduced exactly.
+
+    Captured by making each change in the app on zone 80ec and reading back the
+    value the gateway retained, then confirming the index it reported. Boost was
+    requested as 3 hours and Away as 1 day, which is how the trailing two-character
+    parameter field was found -- it is a duration, not padding.
+    """
+    observed = {
+        "Follow Schedule": ('!80ec"  ', 2, None),
+        "High": ("!80ec$  ", 4, None),
+        "Low": ("!80ec&  ", 6, None),
+        "Boost": ("!80ec'03", 7, 3),
+        "Away": ("!80ec(01", 8, 1),
+    }
+    for preset, (payload, index, parameter) in observed.items():
+        assert encode_mode("80ec", index, parameter) == payload, preset
+        assert len(payload) == const.MODE_WRITE_WIDTH
+        # ... and the map routes the preset to that index
+        assert const.MODE_WRITE_MAP[preset][0] == index, preset
+
+
+def test_boost_is_seven_not_the_legacy_tables_high():
+    """The legacy table lists 7 as "High"; the app writes 7 for Boost.
+
+    A zone boosting would otherwise be reported as High. Confirmed on the read
+    side too: zone 80ec reported index 7 with the 21.0 C band applied.
+    """
+    state = parse_summary("80ec" + chr(36) + chr(39) + chr(82) + chr(74))["80ec"]
+    assert state.mode_index == 7
+    assert state.mode_key == "boost"
+    assert state.preset == "Boost"
+    assert state.detail == "boost"
+    assert state.target_temperature == 21.0
+
+
+def test_away_and_frost_apply_the_frost_band():
+    """Both dropped zone 80ec / 7e8f to 5.0 C when set at the app and the wall."""
+    away = parse_summary("80ec" + chr(36) + chr(40) + chr(82) + chr(42))["80ec"]
+    assert (away.mode_index, away.mode_key, away.preset) == (8, "away", "Away")
+    assert away.target_temperature == 5.0
+    frost = parse_summary("7e8f" + chr(36) + chr(41) + chr(84) + chr(42))["7e8f"]
+    assert (frost.mode_index, frost.mode_key, frost.preset) == (9, "frost", "Frost")
+    assert frost.target_temperature == 5.0
+
+
+def test_unobserved_mode_indices_get_no_preset():
+    """10 and 11 have never been seen; they must not claim a preset."""
+    for index in (10, 11):
+        state = parse_summary("aaaa" + chr(36) + chr(index + 32) + "RD")["aaaa"]
+        assert state.mode_key == "on"
+        assert state.preset is None
+
+
+def test_only_verified_presets_are_writable():
+    assert set(const.MODE_WRITE_MAP) == {
+        "Follow Schedule", "High", "Low", "Boost", "Away", "Frost",
+    }
+    # Everything writable must also be displayable.
+    assert set(const.MODE_WRITE_MAP) <= set(const.PRESET_MODES)
+
+
+def test_mode_parameter_bounds():
+    assert encode_mode("abcd", 7, 0) == "!abcd'00"
+    assert encode_mode("abcd", 7, 99) == "!abcd'99"
+    for bad in (-1, 100, 1000):
+        with pytest.raises(ValueError):
+            encode_mode("abcd", 7, bad)
+
+
 def test_setpoints_used_in_the_live_write_test():
     """The three values actually written to zone 80ec on 2026-08-05.
 
