@@ -1,9 +1,14 @@
 """Regression tests pinned to a real gateway capture.
 
-Every literal below came off Nick's JGHUB2 (SALJG30, devId 201328421) on
-2026-08-04. The two write-encoding tests are the strongest evidence available:
-they reproduce, byte for byte, the payloads the JG Aura app itself last wrote and
-the gateway retained.
+Captured from a JGHUB2 (Salus SALJG30, typeName IT600_1, gateway firmware 133913,
+iT600 firmware 0176) in August 2026. The encoded payloads -- the summary blob and
+the retained command values -- are verbatim from the device. Zone names, the
+gateway serial and the device id have been replaced with neutral placeholders;
+the decoder treats names purely as a lookup table, so the tests are unaffected.
+
+The two write-encoding tests are the strongest evidence here: they reproduce,
+byte for byte, the payloads the JG Aura app itself last wrote and the gateway
+retained.
 """
 
 from __future__ import annotations
@@ -24,13 +29,13 @@ parse_summary = api.parse_summary
 SUMMARY = 'c9b0$#RD8848-/--1898$"RF7150$#RD7e8f$%UDd725$"TF80ec$#TDa64c$"UF725f$"THffff0000~'
 
 NAMES_S02 = (
-    "872aKitchen,80b0Sitting Room,c4d0Gabriel,7fc6Bathroom,2417Snug,7fd2Office,"
-    "8ec1Bedroom,3419Entrance,1898Entrance,7150Bedroom,ad81Living Room,"
-    "725fKitchen (8),7e8fGabriel,d725Bathroom,80ecSnug,c9b0Boudoir,a64cSitting Room,"
+    "872aZone A,80b0Zone B,c4d0Zone C,7fc6Zone D,2417Zone E,7fd2Zone F,"
+    "8ec1Zone G,3419Zone H,1898Zone H,7150Zone G,ad81Upper Landing,"
+    "725fZone A (8),7e8fZone C,d725Zone D,80ecZone E,c9b0Zone I,a64cZone B,"
 )
 
 GROUP_NAME = (
-    "Laurels   Group1    Group2    Group3    Group4    Group5    Group6    "
+    "Home      Group1    Group2    Group3    Group4    Group5    Group6    "
     "Group7    Group8    Group9    Group10   Group11   Group12   Group13   "
     "Group14   Group15   Group16   Group17   Group18   "
 )
@@ -59,7 +64,7 @@ def _xml(**overrides: str) -> str:
         ("2262", "online", "online"): overrides.get("online", "true"),
         ("2247", "005", "IT600 Version"): "0176",
         ("2271", "006", "Gateway Version"): "133913",
-        ("2270", "007", "Gateway SID_PW"): "SAH00004077_94",
+        ("2270", "007", "Gateway SID_PW"): "SAH00000000_00",
         ("2294", "B05", "Set Operation Mode"): "!7e8f%  ",
         ("2273", "B06", "Set Current Setpoint"): "!1898B",
         ("2272", "B07", "Set HW Boost Hours"): "",
@@ -99,8 +104,8 @@ def test_empty_table_is_an_error():
 def test_name_list_includes_stale_entries():
     names = parse_device_names(NAMES_S02, "")
     assert len(names) == 17
-    assert names["725f"] == "Kitchen (8)"
-    assert names["a64c"] == "Sitting Room"
+    assert names["725f"] == "Zone A (8)"
+    assert names["a64c"] == "Zone B"
     # 8 of these 17 have no live device -- proof the name list must never drive
     # iteration (upstream issue #1).
     live = set(parse_summary(SUMMARY))
@@ -108,7 +113,7 @@ def test_name_list_includes_stale_entries():
 
 
 def test_names_with_spaces_survive():
-    assert parse_device_names("ad81Living Room,")["ad81"] == "Living Room"
+    assert parse_device_names("ad81Upper Landing,")["ad81"] == "Upper Landing"
 
 
 def test_short_tokens_ignored():
@@ -127,14 +132,14 @@ def test_summary_yields_nine_zones_and_stops_at_terminator():
 @pytest.mark.parametrize(
     ("device_id", "name", "current", "target", "mode_index"),
     [
-        ("7150", "Bedroom", 25.0, 18.0, 3),
-        ("c9b0", "Boudoir", 25.0, 18.0, 3),
-        ("1898", "Entrance", 25.0, 19.0, 2),
-        ("725f", "Kitchen (8)", 26.0, 20.0, 2),
-        ("80ec", "Snug", 26.0, 18.0, 3),
-        ("a64c", "Sitting Room", 26.5, 19.0, 2),
-        ("7e8f", "Gabriel", 26.5, 18.0, 5),
-        ("d725", "Bathroom", 26.0, 19.0, 2),
+        ("7150", "Zone G", 25.0, 18.0, 3),
+        ("c9b0", "Zone I", 25.0, 18.0, 3),
+        ("1898", "Zone H", 25.0, 19.0, 2),
+        ("725f", "Zone A (8)", 26.0, 20.0, 2),
+        ("80ec", "Zone E", 26.0, 18.0, 3),
+        ("a64c", "Zone B", 26.5, 19.0, 2),
+        ("7e8f", "Zone C", 26.5, 18.0, 5),
+        ("d725", "Zone D", 26.0, 19.0, 2),
     ],
 )
 def test_live_zone_decode(device_id, name, current, target, mode_index):
@@ -197,30 +202,30 @@ def test_heat_demand_reads_the_upper_bank():
 
 
 def test_snapshot_metadata():
-    snap = build_snapshot("201328421", parse_attributes(_xml()))
+    snap = build_snapshot("100000000", parse_attributes(_xml()))
     assert snap.online is True
-    assert snap.group_name == "Laurels"
+    assert snap.group_name == "Home"
     assert snap.it600_version == "0176"
     assert snap.gateway_version == "133913"
-    assert snap.serial == "SAH00004077_94"
+    assert snap.serial == "SAH00000000_00"
     assert snap.error_message is None  # '{}' means clean
     assert len(snap.thermostats) == 9
 
 
 def test_no_hot_water_switch_is_invented():
     # B07 empty and S07 empty -> this system has no hot water circuit. Upstream
-    # reads B07 as a device id and fabricates a switch from Boudoir's bytes.
-    snap = build_snapshot("201328421", parse_attributes(_xml()))
+    # reads B07 as a device id and fabricates a switch from the first zone's bytes.
+    snap = build_snapshot("100000000", parse_attributes(_xml()))
     assert snap.has_hot_water is False
 
 
 def test_hot_water_detected_when_actually_present():
-    snap = build_snapshot("201328421", parse_attributes(_xml(S07="2569Q")))
+    snap = build_snapshot("100000000", parse_attributes(_xml(S07="2569Q")))
     assert snap.has_hot_water is True
 
 
 def test_error_message_surfaced_when_non_empty():
-    snap = build_snapshot("201328421", parse_attributes(_xml(S09='{"e":"1"}')))
+    snap = build_snapshot("100000000", parse_attributes(_xml(S09='{"e":"1"}')))
     assert snap.error_message == '{"e":"1"}'
 
 

@@ -1,12 +1,14 @@
 {
   "domain": "jg_aura",
   "name": "JG Aura",
-  "codeowners": [],
+  "codeowners": [
+    "@nickjupp"
+  ],
   "config_flow": true,
-  "documentation": "https://github.com/nick/jg_aura_ha",
+  "documentation": "https://github.com/nickjupp/jg_aura_ha",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/nick/jg_aura_ha/issues",
+  "issue_tracker": "https://github.com/nickjupp/jg_aura_ha/issues",
   "requirements": [],
   "version": "0.1.0"
 }
