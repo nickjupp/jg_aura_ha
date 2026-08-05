@@ -1,0 +1,61 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "JG Aura",
+        "description": "Sign in with the same account you use in the JG Aura app.",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "host": "API endpoint"
+        },
+        "data_description": {
+          "host": "Only change this if your gateway is registered outside Europe."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate JG Aura",
+        "description": "The JG Aura cloud rejected the saved credentials for {email}.",
+        "data": { "password": "Password" }
+      },
+      "reconfigure": {
+        "title": "Reconfigure JG Aura",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "host": "API endpoint"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the JG Aura cloud.",
+      "invalid_auth": "That email and password were rejected.",
+      "unknown": "Unexpected error - check the logs."
+    },
+    "abort": {
+      "already_configured": "This gateway is already set up.",
+      "wrong_account": "Those credentials belong to a different gateway.",
+      "reauth_successful": "Re-authentication was successful.",
+      "reconfigure_successful": "Reconfiguration was successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "JG Aura options",
+        "data": { "scan_interval": "Polling interval" },
+        "data_description": {
+          "scan_interval": "How often to poll the JG Aura cloud. The service is undocumented and unmetered; keep this as high as you can tolerate."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "zones": { "name": "Zones" },
+      "zones_online": { "name": "Zones online" },
+      "it600_version": { "name": "iT600 firmware" },
+      "error_message": { "name": "Gateway error" }
+    }
+  }
+}
