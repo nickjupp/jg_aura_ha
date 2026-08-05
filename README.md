@@ -27,7 +27,7 @@ substantive fixes are:
 | **Hardcoded attribute ids** | `2257`, `2287`, `2272` — per-tenant internal keys that differ between gateways. | Resolves by the `name` the gateway publishes for every attribute (`001`, `S02`, `B05` …). |
 | **Request volume** | Two coordinators, two clients, 2 s and 5 s intervals, two requests per poll — roughly 50 req/min. | One client, one coordinator, one request per poll, 60 s default (30–600 configurable). |
 | **Credential leak** | Logs the full request URL on failure — which carries the MD5 password hash *and* the session token. | Never logs a URL; token-shaped strings are scrubbed from logs and exception messages. |
-| **Writes a setting every poll** | Sends `B01=5` before each read, believing it a cache refresh. `B01` is **"Hyper Duration"** — a boost parameter. | Writes nothing to poll. The real refresh attribute is `C10` "Reflush All Attributes". |
+| **Wrong refresh attribute** | Sends `B01=5` before each read as a cache refresh. `B01` is actually **"Hyper Duration"**, a boost parameter — so it nudges the gateway only as a side effect of writing *something*. | Writes `C10` "Reflush All Attributes", which is what the gateway documents for the job. The nudge itself is genuinely required — see below. |
 | **Phantom hot water switch** | Reads `B07` ("Set HW Boost Hours", an outbound command) as a device id; when empty its `'' in record` test matches the first zone and invents a switch from its bytes. | Detects hot water from `S07`, and creates nothing when there is none. |
 | **Offline stats look live** | `mode_index > 9` counts as "on", but index 15 means OFFLINE. | Offline zones are `unavailable`, and the 6.5 °C offline sentinel is suppressed rather than reported as a freezing room. |
 | **Invalid presets** | Read-back table yields `AUTO_MEDIUM`/`FROST`, which aren't in the declared `preset_modes` — Home Assistant raises. | One bidirectional map; scheduled levels collapse to a single preset with the detail kept as a state attribute. |
@@ -55,17 +55,25 @@ the zone's scheduled mode left intact. The encoding also matches the value the
 gateway retained from the JG Aura app's own last write (`B06 = '!1898B'` →
 `(66−32) × 0.5 = 17.0 °C`). The unit tests assert all of it byte-for-byte.
 
-**Mode/preset writes are deliberately disabled.** `ClimateEntityFeature.PRESET_MODE`
-is not declared. The payload *format* is corroborated the same way
-(`B05 = '!7e8f%  '`, where `ord('%') − 32 = 5`, the mode index that zone reports),
-but *which index means "resume schedule"* is unknown, and guessing it on a live
-heating system is not worth the risk. `encode_mode()` and
-`async_set_mode_index()` exist and are tested; nothing calls them until the map is
-established empirically.
+**Mode/preset writes are enabled for two presets only.** The map was built by
+making each change in the JG Aura app and reading back the `B05` value the gateway
+retained:
 
-Note the asymmetry to resolve when it is: mode writes appear space-padded to 8
-characters, setpoint writes are not padded. That is a plausible cause of silent
-write failures.
+| Preset | Index | Status |
+|---|---|---|
+| Follow Schedule | 2 | verified — app wrote `!80ec"  ` |
+| High | 4 | verified — app wrote `!80ec$  ` |
+| Low / Away / Frost / Boost | 6 / 8 / 9 / 10? | **not verified — not writable** |
+
+`encode_mode()` reproduces both verified payloads byte for byte, padding included,
+so the wire format is settled. The remaining four indices are what the legacy
+table suggests and are now corroborated at two independent points — but selecting
+one of those presets raises a `HomeAssistantError` explaining why rather than
+sending a guess at someone's heating. Adding an entry to `MODE_WRITE_MAP` after
+observing the app write it is a one-line change.
+
+A mode does **not** override the setpoint: it selects which setpoint band from the
+schedule applies. Switching a zone to High moved its target from 18.0 to 21.0 °C.
 
 `hvac_action` reads the upper bank of the mode index (`index // 15`) as heat demand.
 **This is now verified on hardware.** Driving a zone to 28.0 °C against a 24.5 °C
@@ -95,6 +103,15 @@ the tests is real captured gateway output, so they are genuine regression tests
 rather than restatements of the implementation.
 
 ## Caveats
+
+**The cloud copy is a cache, and the gateway does not push to it.** Every poll
+writes `C10` first and waits ~4 s, or the data goes stale indefinitely — observed
+on 2026-08-05, when a zone changed both at the wall and in the JG Aura app kept
+reporting its previous mode and setpoint for over eight minutes, the summary blob
+byte-for-byte identical across polls. If the nudge fails, the poll logs a warning
+and serves what it has rather than pretending the values are current. This costs
+two requests per poll instead of one; at the 60 s default that is 2/min against
+the legacy integration's ~50/min.
 
 Cloud-dependent, and all JG Aura hardware is discontinued. The Arrayent platform is
 still up as of August 2026 but has no SLA to you, and the JG Aura app itself is

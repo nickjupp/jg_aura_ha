@@ -27,6 +27,11 @@ MAX_SCAN_INTERVAL: Final = 600
 # pre-write value.
 POST_WRITE_REFRESH_DELAY: Final = 6.0
 
+# Settle time between writing the C10 reflush nudge and reading the attribute
+# table back. Without the nudge the cloud serves an indefinitely stale cache;
+# without the settle the read races the gateway's re-push.
+REFLUSH_SETTLE: Final = 4.0
+
 # ---------------------------------------------------------------------------
 # Attribute NAMES.
 #
@@ -46,7 +51,7 @@ ATTR_SET_MODE: Final = "B05"         # "Set Operation Mode"
 ATTR_SET_SETPOINT: Final = "B06"     # "Set Current Setpoint"
 ATTR_HW_BOOST_HOURS: Final = "B07"   # "Set HW Boost Hours"
 ATTR_HYPER_DURATION: Final = "B01"   # "Hyper Duration" -- NOT a refresh. Do not write.
-ATTR_REFLUSH: Final = "C10"          # "Reflush All Attributes"
+ATTR_REFLUSH: Final = "C10"          # "Reflush All Attributes" -- written before every poll
 ATTR_ONLINE: Final = "online"
 ATTR_IT600_VERSION: Final = "005"    # "IT600 Version"
 ATTR_GATEWAY_VERSION: Final = "006"  # "Gateway Version"
@@ -153,16 +158,37 @@ PRESET_MODES: Final[list[str]] = [
 #   B06 (setpoint) : '!' + <4-char id> + chr(round(degrees / 0.5) + 32)
 #   B05 (mode)     : '!' + <4-char id> + chr(mode_index + 32), space-padded to 8
 #
-# Corroborated by the values the gateway retained from the JG Aura app's own
-# last writes: B06 = '!1898B' -> (66-32)*0.5 = 17.0 C, and B05 = '!7e8f%  '
-# -> ord('%')-32 = 5, which is the mode index device 7e8f currently reports.
+# Both formats are VERIFIED against the JG Aura app's own retained writes:
+#   B06 = '!1898B'   -> (66-32)*0.5 = 17.0 C
+#   B05 = '!80ec$  ' -> ord('$')-32 = 4, written by the app for "High"
+# encode_setpoint / encode_mode reproduce both byte for byte, including the
+# padding asymmetry (mode padded to 8, setpoint not).
 #
-# Setpoint writes are considered verified. Mode writes are NOT: which index
-# means "return to schedule" is unknown, so preset writing stays disabled until
-# phase 4 establishes the map empirically.
+# What a mode actually does on this system: it selects WHICH SETPOINT BAND from
+# the schedule applies, rather than overriding the setpoint directly. Observed
+# 2026-08-05 -- switching zone 80ec to High moved its target from 18.0 to 21.0.
 # ---------------------------------------------------------------------------
 WRITE_PREFIX: Final = "!"
 MODE_WRITE_WIDTH: Final = 8
+
+# Preset -> mode index to write.
+#
+# ONLY VERIFIED VALUES BELONG HERE. Each entry below was captured from the JG
+# Aura app's own B05 write on 2026-08-05, by making the change in the app and
+# reading back what the gateway retained:
+#
+#   "Auto"  -> !80ec"    ord('"') - 32 == 2
+#   "High"  -> !80ec$    ord('$') - 32 == 4
+#
+# Low / Away / Frost / Boost are NOT here. The legacy MODES table suggests
+# 6 / 8 / 9 / 10 and is now corroborated at two independent points, but
+# "probably right" is not good enough to write to someone's heating —
+# async_set_preset_mode raises for anything absent from this map. Add an entry
+# only after observing the app write it.
+MODE_WRITE_MAP: Final[dict[str, int]] = {
+    PRESET_SCHEDULE: 2,
+    PRESET_HIGH: 4,
+}
 
 MIN_TEMP: Final = 5.0
 MAX_TEMP: Final = 35.0

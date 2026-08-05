@@ -26,6 +26,7 @@ import aiohttp
 from .const import (
     APP_ID,
     ATTR_DISPLAY_LOCATION,
+    ATTR_REFLUSH,
     ATTR_HW_DEVICE_SETTING,
     ATTR_NAMES_HIGH,
     ATTR_NAMES_LOW,
@@ -43,6 +44,7 @@ from .const import (
     SUB_MODE_DETAIL,
     SUB_MODE_MAP,
     SUMMARY_ID_LEN,
+    REFLUSH_SETTLE,
     SUMMARY_RECORD_LEN,
     SUMMARY_TERMINATOR,
     TEMP_STEP,
@@ -401,9 +403,29 @@ class JgAuraClient:
             await self.login()
 
     async def async_get_snapshot(self) -> GatewaySnapshot:
-        """Poll the gateway. Re-authenticates once if the session has expired."""
+        """Poll the gateway. Re-authenticates once if the session has expired.
+
+        A reflush nudge is written first. This is NOT optional: the cloud holds
+        a cached copy of the gateway's attributes and the gateway does not push
+        updates on its own. Without the nudge the summary blob goes stale
+        indefinitely -- observed 2026-08-05, when a thermostat changed at the
+        wall and via the JG Aura app both continued to read as their previous
+        values for over eight minutes, byte-for-byte identical across polls.
+        """
         async with self._lock:
             await self._ensure_session()
+
+            try:
+                await self._write_attribute_locked(ATTR_REFLUSH, "1")
+                await asyncio.sleep(REFLUSH_SETTLE)
+            except JgAuraError as err:
+                # Prefer stale data over no data -- but say so, because silently
+                # serving a stale snapshot is exactly the trap this call avoids.
+                _LOGGER.warning(
+                    "reflush nudge failed (%s); this poll may return stale values",
+                    err,
+                )
+
             try:
                 body = await self._read_attributes()
             except (JgAuraAuthError, JgAuraResponseError):
@@ -425,23 +447,27 @@ class JgAuraClient:
             deviceTypeId=1,
         )
 
+    async def _write_attribute_locked(self, name: str, value: str) -> None:
+        """Write one attribute. Caller must already hold self._lock."""
+        await self._ensure_session()
+        body = await self._get(
+            "setMultiDeviceAttributes2",
+            secToken=self._token,
+            devId=self._gateway_id,
+            name1=name,
+            value1=value,
+        )
+        try:
+            root = ET.fromstring(body)
+        except ET.ParseError as err:
+            raise JgAuraResponseError(f"write reply was not XML: {err}") from err
+        ret = root.findtext(".//retCode")
+        if ret != "0":
+            raise JgAuraResponseError(f"write to {name} returned retCode {ret}")
+
     async def _write_attribute(self, name: str, value: str) -> None:
         async with self._lock:
-            await self._ensure_session()
-            body = await self._get(
-                "setMultiDeviceAttributes2",
-                secToken=self._token,
-                devId=self._gateway_id,
-                name1=name,
-                value1=value,
-            )
-            try:
-                root = ET.fromstring(body)
-            except ET.ParseError as err:
-                raise JgAuraResponseError(f"write reply was not XML: {err}") from err
-            ret = root.findtext(".//retCode")
-            if ret != "0":
-                raise JgAuraResponseError(f"write to {name} returned retCode {ret}")
+            await self._write_attribute_locked(name, value)
 
     async def async_set_temperature(self, device_id: str, temperature: float) -> None:
         """Set a zone's target temperature."""

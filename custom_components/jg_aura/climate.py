@@ -17,7 +17,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .api import JgAuraError
-from .const import MAX_TEMP, MIN_TEMP, TEMP_STEP
+from .const import (
+    MAX_TEMP,
+    MIN_TEMP,
+    MODE_WRITE_MAP,
+    PRESET_MODES,
+    TEMP_STEP,
+)
 from .coordinator import JgAuraConfigEntry, JgAuraCoordinator
 from .entity import JgAuraZoneEntity
 
@@ -64,12 +70,13 @@ class JgAuraClimate(JgAuraZoneEntity, ClimateEntity):
     _attr_target_temperature_step = TEMP_STEP
     _attr_name = None  # the device carries the name
 
-    # Only the setpoint is writable for now. The mode-write encoding is
-    # corroborated but the meaning of each index is not established, so
-    # ClimateEntityFeature.PRESET_MODE stays off until it is verified against
-    # the real system rather than guessed at. The current mode is still visible
-    # via the extra state attributes below.
-    _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
+    # Presets are readable in full; writes are restricted to the two indices
+    # captured from the JG Aura app itself (see const.MODE_WRITE_MAP). Selecting
+    # an unverified preset raises rather than sending a guessed value.
+    _attr_supported_features = (
+        ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
+    )
+    _attr_preset_modes = PRESET_MODES
 
     def __init__(self, coordinator: JgAuraCoordinator, device_id: str) -> None:
         super().__init__(coordinator, device_id)
@@ -79,10 +86,12 @@ class JgAuraClimate(JgAuraZoneEntity, ClimateEntity):
         # coordinator update, whatever it says — so a write that silently failed
         # reverts visibly rather than being masked.
         self._optimistic_target: float | None = None
+        self._optimistic_preset: str | None = None
 
     @callback
     def _handle_coordinator_update(self) -> None:
         self._optimistic_target = None
+        self._optimistic_preset = None
         super()._handle_coordinator_update()
 
     @property
@@ -100,6 +109,13 @@ class JgAuraClimate(JgAuraZoneEntity, ClimateEntity):
             return self._optimistic_target
         zone = self.zone
         return zone.target_temperature if zone else None
+
+    @property
+    def preset_mode(self) -> str | None:
+        if self._optimistic_preset is not None:
+            return self._optimistic_preset
+        zone = self.zone
+        return zone.preset if zone else None
 
     @property
     def hvac_action(self) -> HVACAction | None:
@@ -136,5 +152,25 @@ class JgAuraClimate(JgAuraZoneEntity, ClimateEntity):
                 f"could not set {self.name or self._device_id} to {temperature}: {err}"
             ) from err
         self._optimistic_target = float(temperature)
+        self.async_write_ha_state()
+        self.coordinator.schedule_refresh_after_write()
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        index = MODE_WRITE_MAP.get(preset_mode)
+        if index is None:
+            raise HomeAssistantError(
+                f"{preset_mode!r} cannot be set from Home Assistant yet: the mode "
+                "index the JG Aura app writes for it has not been observed, and "
+                "guessing would put the zone on the wrong setpoint band. "
+                f"Settable presets: {', '.join(sorted(MODE_WRITE_MAP))}. "
+                "Use the JG Aura app for the others."
+            )
+        try:
+            await self.coordinator.client.async_set_mode_index(self._device_id, index)
+        except (JgAuraError, ValueError) as err:
+            raise HomeAssistantError(
+                f"could not set {self.name or self._device_id} to {preset_mode}: {err}"
+            ) from err
+        self._optimistic_preset = preset_mode
         self.async_write_ha_state()
         self.coordinator.schedule_refresh_after_write()
