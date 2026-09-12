@@ -44,6 +44,7 @@ from .const import (
     SUB_MODE_DETAIL,
     SUB_MODE_MAP,
     SUMMARY_ID_LEN,
+    REFLUSH_FAILURE_LIMIT,
     REFLUSH_SETTLE,
     SUMMARY_RECORD_LEN,
     SUMMARY_TERMINATOR,
@@ -70,6 +71,15 @@ class JgAuraAuthError(JgAuraError):
 
 class JgAuraResponseError(JgAuraError):
     """The cloud replied with something we could not use."""
+
+
+class JgAuraStaleError(JgAuraError):
+    """The reflush nudge has failed often enough that the data is untrustworthy.
+
+    Raised instead of returning a snapshot, so the coordinator marks every zone
+    unavailable. Being told nothing is worse than being told something wrong
+    only when the wrong thing is obvious -- and a thermostat reading is not.
+    """
 
 
 _SCRUB = re.compile(r"(secToken=|password=)[^&\s]+")
@@ -342,10 +352,25 @@ class JgAuraClient:
         self._user_id: str | None = None
         self._gateway_id: str | None = None
         self._lock = asyncio.Lock()
+        self._reflush_failures = 0
 
     @property
     def password_hash(self) -> str:
         return self._password_hash
+
+    @property
+    def reflush_failures(self) -> int:
+        """Consecutive reflush-nudge failures; 0 when the last one succeeded."""
+        return self._reflush_failures
+
+    @property
+    def reflush_failing(self) -> bool:
+        """True once the nudge has failed at all, before the limit bites.
+
+        Deliberately trips on the *first* failure rather than at the limit, so
+        the diagnostic sensor leads the unavailability rather than following it.
+        """
+        return self._reflush_failures > 0
 
     @property
     def gateway_id(self) -> str | None:
@@ -421,6 +446,10 @@ class JgAuraClient:
         indefinitely -- observed 2026-08-05, when a thermostat changed at the
         wall and via the JG Aura app both continued to read as their previous
         values for over eight minutes, byte-for-byte identical across polls.
+
+        Because it is not optional, its failure is not cosmetic: after
+        REFLUSH_FAILURE_LIMIT consecutive failures this raises JgAuraStaleError
+        rather than returning a cached snapshot, so the zones go unavailable.
         """
         async with self._lock:
             await self._ensure_session()
@@ -429,12 +458,44 @@ class JgAuraClient:
                 await self._write_attribute_locked(ATTR_REFLUSH, "1")
                 await asyncio.sleep(REFLUSH_SETTLE)
             except JgAuraError as err:
-                # Prefer stale data over no data -- but say so, because silently
-                # serving a stale snapshot is exactly the trap this call avoids.
-                _LOGGER.warning(
-                    "reflush nudge failed (%s); this poll may return stale values",
-                    err,
-                )
+                self._reflush_failures += 1
+
+                if self._reflush_failures >= REFLUSH_FAILURE_LIMIT:
+                    # Fail closed. Preferring stale data over no data is right
+                    # for a blip and wrong for a dead gateway, and the two are
+                    # indistinguishable from a single failure -- so count them.
+                    raise JgAuraStaleError(
+                        f"reflush nudge has failed {self._reflush_failures} "
+                        f"consecutive times ({err}); refusing to serve a "
+                        "snapshot that cannot be trusted to be current"
+                    ) from err
+
+                # Log the first failure and then fall silent: the unpatched
+                # version emitted this line every 60 s, which came to 645 lines
+                # and 46% of the instance's whole log in one day (11 Sep 2026)
+                # and actively buried the faults someone was looking for.
+                if self._reflush_failures == 1:
+                    _LOGGER.warning(
+                        "reflush nudge failed (%s); this poll may return stale "
+                        "values. Further failures log at debug until recovery, "
+                        "or until %d consecutive failures mark the gateway "
+                        "unavailable",
+                        err,
+                        REFLUSH_FAILURE_LIMIT,
+                    )
+                else:
+                    _LOGGER.debug(
+                        "reflush nudge failed again (%d consecutive): %s",
+                        self._reflush_failures,
+                        err,
+                    )
+            else:
+                if self._reflush_failures:
+                    _LOGGER.warning(
+                        "reflush nudge recovered after %d consecutive failures",
+                        self._reflush_failures,
+                    )
+                self._reflush_failures = 0
 
             try:
                 body = await self._read_attributes()

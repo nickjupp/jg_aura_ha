@@ -16,7 +16,9 @@
       "reauth_confirm": {
         "title": "Re-authenticate JG Aura",
         "description": "The JG Aura cloud rejected the saved credentials for {email}.",
-        "data": { "password": "Password" }
+        "data": {
+          "password": "Password"
+        }
       },
       "reconfigure": {
         "title": "Reconfigure JG Aura",
@@ -43,7 +45,9 @@
     "step": {
       "init": {
         "title": "JG Aura options",
-        "data": { "scan_interval": "Polling interval" },
+        "data": {
+          "scan_interval": "Polling interval"
+        },
         "data_description": {
           "scan_interval": "How often to poll the JG Aura cloud. The service is undocumented and unmetered; keep this as high as you can tolerate."
         }
@@ -52,10 +56,23 @@
   },
   "entity": {
     "sensor": {
-      "zones": { "name": "Zones" },
-      "zones_online": { "name": "Zones online" },
-      "it600_version": { "name": "iT600 firmware" },
-      "error_message": { "name": "Gateway error" }
+      "zones": {
+        "name": "Zones"
+      },
+      "zones_online": {
+        "name": "Zones online"
+      },
+      "it600_version": {
+        "name": "iT600 firmware"
+      },
+      "error_message": {
+        "name": "Gateway error"
+      }
+    },
+    "binary_sensor": {
+      "gateway_stale": {
+        "name": "Gateway data stale"
+      }
     }
   }
 }

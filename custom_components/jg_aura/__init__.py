@@ -7,7 +7,11 @@ from homeassistant.core import HomeAssistant
 
 from .coordinator import JgAuraConfigEntry, JgAuraCoordinator
 
-PLATFORMS: list[Platform] = [Platform.CLIMATE, Platform.SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.CLIMATE,
+    Platform.SENSOR,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: JgAuraConfigEntry) -> bool:

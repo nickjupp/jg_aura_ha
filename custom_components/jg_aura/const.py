@@ -33,6 +33,18 @@ POST_WRITE_REFRESH_DELAY: Final = 6.0
 # without the settle the read races the gateway's re-push.
 REFLUSH_SETTLE: Final = 4.0
 
+# Consecutive reflush failures tolerated before the poll fails closed and the
+# entities go unavailable. At the 60 s default poll that is roughly three
+# minutes of staleness -- long enough to ride out a cloud blip, short enough
+# that a dead gateway cannot masquerade as a live one.
+#
+# It did exactly that on 8-11 Sep 2026: the hub hung during a power cut and the
+# cloud kept serving its cached copy, so every zone reported byte-identical
+# values for 61 hours while the hub's own LED, the `online` attribute and the
+# error-message sensor all read healthy -- all three being downstream of the
+# same cache. The failing nudge was the only true signal, and it was swallowed.
+REFLUSH_FAILURE_LIMIT: Final = 3
+
 # ---------------------------------------------------------------------------
 # Attribute NAMES.
 #
