@@ -28,6 +28,21 @@ MAX_SCAN_INTERVAL: Final = 600
 # pre-write value.
 POST_WRITE_REFRESH_DELAY: Final = 6.0
 
+# How long an optimistic value is trusted while the gateway catches up, as a
+# multiple of the poll interval.
+#
+# The post-write refresh above is deliberately eager and frequently races: at
+# 6 s the cloud has the write but has not necessarily re-polled the gateway, so
+# it answers with the PRE-write value. Clearing the optimistic value on that
+# answer made every preset change visibly bounce - new value, old value, then
+# the new one again a poll later. Observed on zone 80ec, 21 Sep 2026.
+#
+# So an optimistic value now survives a disagreeing update until the gateway
+# either confirms it or this deadline passes. The "a failed write reverts
+# visibly rather than being masked" property is kept; it just takes two poll
+# intervals instead of six seconds.
+OPTIMISTIC_HOLD_INTERVALS: Final = 2
+
 # Settle time between writing the C10 reflush nudge and reading the attribute
 # table back. Without the nudge the cloud serves an indefinitely stale cache;
 # without the settle the read races the gateway's re-push.

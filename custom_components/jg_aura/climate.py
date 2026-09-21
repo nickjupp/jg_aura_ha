@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from time import monotonic
 from typing import Any
 
 from homeassistant.components.climate import (
@@ -18,9 +19,11 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .api import JgAuraError
 from .const import (
+    DEFAULT_SCAN_INTERVAL,
     MAX_TEMP,
     MIN_TEMP,
     MODE_WRITE_MAP,
+    OPTIMISTIC_HOLD_INTERVALS,
     PRESET_MODES,
     TEMP_STEP,
 )
@@ -82,16 +85,39 @@ class JgAuraClimate(JgAuraZoneEntity, ClimateEntity):
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{coordinator.data.device_id}_{device_id}"
         # Shown immediately after a write so the UI doesn't sit on the old value
-        # for the ~6 s the gateway takes to report it back. Cleared on the next
-        # coordinator update, whatever it says — so a write that silently failed
-        # reverts visibly rather than being masked.
+        # while the gateway catches up. Held until the gateway CONFIRMS the
+        # value, or until _optimistic_deadline passes — whichever comes first.
+        #
+        # Clearing on the next update regardless, as this used to, meant the
+        # eager post-write refresh (POST_WRITE_REFRESH_DELAY, 6 s) usually
+        # answered with the pre-write value and made every change bounce. A
+        # write that silently fails still reverts visibly, just after the
+        # deadline rather than immediately — see const.OPTIMISTIC_HOLD_INTERVALS.
         self._optimistic_target: float | None = None
         self._optimistic_preset: str | None = None
+        self._optimistic_deadline: float = 0.0
+
+    def _start_optimistic_hold(self) -> None:
+        """Trust optimistic values until the gateway confirms, or we time out."""
+        interval = self.coordinator.update_interval
+        seconds = interval.total_seconds() if interval else DEFAULT_SCAN_INTERVAL
+        self._optimistic_deadline = monotonic() + seconds * OPTIMISTIC_HOLD_INTERVALS
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        self._optimistic_target = None
-        self._optimistic_preset = None
+        zone = self.zone
+        expired = monotonic() >= self._optimistic_deadline
+
+        if self._optimistic_target is not None and (
+            expired or (zone is not None and zone.target_temperature == self._optimistic_target)
+        ):
+            self._optimistic_target = None
+
+        if self._optimistic_preset is not None and (
+            expired or (zone is not None and zone.preset == self._optimistic_preset)
+        ):
+            self._optimistic_preset = None
+
         super()._handle_coordinator_update()
 
     @property
@@ -152,6 +178,7 @@ class JgAuraClimate(JgAuraZoneEntity, ClimateEntity):
                 f"could not set {self.name or self._device_id} to {temperature}: {err}"
             ) from err
         self._optimistic_target = float(temperature)
+        self._start_optimistic_hold()
         self.async_write_ha_state()
         self.coordinator.schedule_refresh_after_write()
 
@@ -172,5 +199,6 @@ class JgAuraClimate(JgAuraZoneEntity, ClimateEntity):
                 f"could not set {self.name or self._device_id} to {preset_mode}: {err}"
             ) from err
         self._optimistic_preset = preset_mode
+        self._start_optimistic_hold()
         self.async_write_ha_state()
         self.coordinator.schedule_refresh_after_write()
