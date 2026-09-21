@@ -177,7 +177,8 @@ def test_scheduled_modes_collapse_to_one_preset_but_keep_detail():
     assert states["1898"].preset == "Follow Schedule"  # index 2 = AUTO_MEDIUM
     assert states["1898"].detail == "schedule_medium"
     assert states["7150"].detail == "schedule_low"  # index 3
-    assert states["7e8f"].preset == "High"  # index 5
+    assert states["7e8f"].preset == "Medium"  # index 5
+    assert states["7e8f"].detail == "manual_medium"
 
 
 def test_partial_trailing_record_ignored():
@@ -228,6 +229,7 @@ def test_mode_write_map_matches_the_app_payloads():
     observed = {
         "Follow Schedule": ('!80ec"  ', 2, None),
         "High": ("!80ec$  ", 4, None),
+        "Medium": ("!80ec%  ", 5, None),
         "Low": ("!80ec&  ", 6, None),
         "Boost": ("!80ec'03", 7, 3),
         "Away": ("!80ec(01", 8, 1),
@@ -273,7 +275,7 @@ def test_unobserved_mode_indices_get_no_preset():
 
 def test_only_verified_presets_are_writable():
     assert set(const.MODE_WRITE_MAP) == {
-        "Follow Schedule", "High", "Low", "Boost", "Away", "Frost",
+        "Follow Schedule", "High", "Medium", "Low", "Boost", "Away", "Frost",
     }
     # Everything writable must also be displayable.
     assert set(const.MODE_WRITE_MAP) <= set(const.PRESET_MODES)

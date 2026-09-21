@@ -109,7 +109,11 @@ SUB_MODE_MAP: Final[dict[int, str]] = {
     2: "schedule",   # ... Medium band
     3: "schedule",   # ... Low band
     4: "high",       # verified: app writes 4 for High
-    5: "high",       # observed on a zone set at the wall
+    5: "medium",     # verified 2026-09-21: app writes 5 for Medium. B05 read
+                     # back '!80ec%  ' and the summary gave mode 5 / target
+                     # 18.0, against High's index 4 / target 21.0. Previously
+                     # assumed "high" from the legacy table, which collapsed
+                     # Medium and High into a single preset.
     6: "low",        # verified: app writes 6 for Low
     7: "boost",      # verified: app writes 7 for Boost -- the legacy table calls
                      # this "High", which would mis-report a boosting zone
@@ -130,7 +134,7 @@ SUB_MODE_DETAIL: Final[dict[int, str]] = {
     2: "schedule_medium",
     3: "schedule_low",
     4: "manual_high",
-    5: "manual_high",
+    5: "manual_medium",
     6: "manual_low",
     7: "boost",
     8: "away",
@@ -141,6 +145,7 @@ SUB_MODE_DETAIL: Final[dict[int, str]] = {
 
 PRESET_SCHEDULE: Final = "Follow Schedule"
 PRESET_HIGH: Final = "High"
+PRESET_MEDIUM: Final = "Medium"
 PRESET_LOW: Final = "Low"
 PRESET_AWAY: Final = "Away"
 PRESET_FROST: Final = "Frost"
@@ -149,6 +154,7 @@ PRESET_BOOST: Final = "Boost"
 MODE_KEY_TO_PRESET: Final[dict[str, str]] = {
     "schedule": PRESET_SCHEDULE,
     "high": PRESET_HIGH,
+    "medium": PRESET_MEDIUM,
     "low": PRESET_LOW,
     "away": PRESET_AWAY,
     "frost": PRESET_FROST,
@@ -161,6 +167,7 @@ MODE_KEY_TO_PRESET: Final[dict[str, str]] = {
 PRESET_MODES: Final[list[str]] = [
     PRESET_SCHEDULE,
     PRESET_HIGH,
+    PRESET_MEDIUM,
     PRESET_LOW,
     PRESET_AWAY,
     PRESET_FROST,
@@ -196,6 +203,7 @@ MODE_WRITE_WIDTH: Final = 8
 #
 #   Auto   -> !80ec"    index 2, no parameter
 #   High   -> !80ec$    index 4, no parameter
+#   Medium -> !80ec%    index 5, no parameter  (captured 2026-09-21)
 #   Low    -> !80ec&    index 6, no parameter
 #   Boost  -> !80ec'03  index 7, parameter = HOURS   (3 hours requested)
 #   Away   -> !80ec(01  index 8, parameter = DAYS    (1 day requested)
@@ -210,6 +218,7 @@ DEFAULT_AWAY_DAYS: Final = 1
 MODE_WRITE_MAP: Final[dict[str, tuple[int, int | None]]] = {
     PRESET_SCHEDULE: (2, None),
     PRESET_HIGH: (4, None),
+    PRESET_MEDIUM: (5, None),
     PRESET_LOW: (6, None),
     PRESET_BOOST: (7, DEFAULT_BOOST_HOURS),
     PRESET_AWAY: (8, DEFAULT_AWAY_DAYS),
